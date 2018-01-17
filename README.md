@@ -1,2 +1,2 @@
 # ECS-templates
-Repository to store all the AWS ECS Tempaltes
+Repository to store all the AWS ECS Tempalates
