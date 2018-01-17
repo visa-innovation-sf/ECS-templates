@@ -1,0 +1,201 @@
+Description: >
+  Service & task definition configuration Template.
+
+Parameters:
+  Tag:
+    Type: String
+    Default: latest
+
+  DesiredCount:
+    Type: Number
+    Default: 1
+
+  TargetGroup:
+    Type: String
+
+  Cluster:
+    Type: String
+
+  Repository:
+    Type: String
+
+  Cpu:
+    Type: Number
+    Default: 512
+
+  Memory:
+    Type: Number
+    Default: 1024
+
+  ContainerPort:
+    Type: Number
+
+  LaunchType:
+    Type: String
+
+Resources:
+  ECSServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: [ecs.amazonaws.com]
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+      - PolicyName: ecs-service
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action: ['elasticloadbalancing:DeregisterInstancesFromLoadBalancer', 'elasticloadbalancing:DeregisterTargets',
+              'elasticloadbalancing:Describe*', 'elasticloadbalancing:RegisterInstancesWithLoadBalancer',
+              'elasticloadbalancing:RegisterTargets', 'ec2:Describe*', 'ec2:AuthorizeSecurityGroupIngress']
+            Resource: '*'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole
+  AutoscalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: [application-autoscaling.amazonaws.com]
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+      - PolicyName: service-autoscaling
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action: ['application-autoscaling:*', 'cloudwatch:DescribeAlarms', 'cloudwatch:PutMetricAlarm',
+              'ecs:DescribeServices', 'ecs:UpdateService']
+            Resource: '*'
+
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn: ListenerRule
+    Properties:
+      Cluster: !Ref Cluster
+      Role: !Ref ECSServiceRole
+      DesiredCount: !Ref DesiredCount
+      TaskDefinition: arn:aws:ecs:us-east-1:569405759759:task-definition/first-run-task-definition:1
+      LaunchType: FARGATE
+      LoadBalancers:
+        - ContainerName: sample-container
+          ContainerPort: !Ref ContainerPort
+          TargetGroupArn: !Ref TargetGroup
+      ServiceName: sample-app-service
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGrous:
+            - !Ref ECSHostSecurityGroup
+
+  ScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 5
+      MinCapacity: !Ref DesiredCount
+      ResourceId: !Join ['', [service/, !Ref 'Cluster', /, !GetAtt [service, Name]]]
+      RoleARN: !GetAtt [AutoscalingRole, Arn]
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  ScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: AStepPolicy
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref ScalableTarget
+      StepScalingPolicyConfiguration:
+      AdjustmentType: PercentChangeInCapacity
+      Cooldown: 60
+      MetricAggregationType: Average
+      StepAdjustments:
+        - MetricIntervalLowerBound: 0
+          ScalingAdjustment: 200
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    executionRoleArn: arn:aws:iam::569405759759:role/ecsTaskExecutionRole
+    Properties:
+      Family: first-run-task-definition
+      ContainerDefinitions:
+        - Name: sample-app
+          Image: httpd:2.4
+          Cpu: 256
+          memoryReservation: 512
+          PortMappings:
+            - ContainerPort: 80
+              protocol: tcp
+              hostPort: 80
+          Environment:
+            - Name: Tag
+              Value: !Ref Tag
+          logConfiguration:
+              logDriver: awslogs
+          options:
+              awslogs-group: "/ecs/first-run-task-definition"
+              awslogs-region: us-east-1
+              awslogs-stream-prefix: ecs
+          entryPoint:
+              - sh
+              - "-c"
+          command:
+              - '/bin/sh -c "echo ''<html> <head> <title>Amazon ECS Sample App</title> <style>body
+                {margin-top: 40px; background-color: #333;} </style> </head><body> <div style=color:white;text-align:center>
+                <h1>Amazon ECS Sample App</h1> <h2>Congratulations!</h2> <p>Your application is
+                now running on a container in Amazon ECS.</p> </div></body></html>'' >  /usr/local/apache2/htdocs/index.html
+                && httpd-foreground"'
+          essential: true
+      Memory: '512'
+      cpu: '256'
+      compatibilities:
+        - EC2
+        - FARGATE
+      taskDefinitionArn: arn:aws:ecs:us-east-1:569405759759:task-definition/first-run-task-definition:1
+      requiresAttributes:
+        - targetId:
+          targetType:
+          value:
+          name: com.amazonaws.ecs.capability.docker-remote-api.1.18
+        - targetId:
+          targetType:
+          value:
+          name: ecs.capability.task-eni
+        - targetId:
+          targetType:
+          value:
+          name: ecs.capability.execution-role-awslogs
+        - targetId:
+          targetType:
+          value:
+          name: com.amazonaws.ecs.capability.logging-driver.awslogs
+        - targetId:
+          targetType:
+          value:
+          name: com.amazonaws.ecs.capability.docker-remote-api.1.21
+        - targetId:
+          targetType:
+          value:
+          name: com.amazonaws.ecs.capability.docker-remote-api.1.19
+      requiresCompatibilities:
+        - FARGATE
+      networkMode: awsvpc
+      revision: 1
+      status: ACTIVE
+
+  Outputs:
+    ImageName:
+      Description: ImageName
+      Value: !Sub ${Repository}:${Tag}
+
+    Service:
+      Description: Service Name
+      Value: !Ref service
+
+    StackName:
+      Value: !Ref AWS::StackName
