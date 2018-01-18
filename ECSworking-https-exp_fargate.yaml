@@ -79,8 +79,6 @@ Mappings:
     ap-southeast-2:
       AMIID: ami-5781be34
 Resources:
-  ECSCluster:
-    Type: AWS::ECS::Cluster
   Repository:
     Type: AWS::ECR::Repository
     DeletionPolicy: Retain
