@@ -55,8 +55,8 @@ Parameters:
     Type: String
     Description: The name of the s3 bucket where the app configurations are stored.
   ECSCluster:
-    Type: AWS::ECS::Cluster
-    Description: The name to be given to the ECSCluster
+    Type: String
+    Description: The name of the Fargate Cluster.
 
 Mappings:
   AWSRegionToAMI:
@@ -78,8 +78,9 @@ Mappings:
       AMIID: ami-a900a3ca
     ap-southeast-2:
       AMIID: ami-5781be34
-
 Resources:
+  ECSCluster:
+    Type: AWS::ECS::Cluster
   Repository:
     Type: AWS::ECR::Repository
     DeletionPolicy: Retain
@@ -441,7 +442,7 @@ Resources:
           - Name: AWS_DEFAULT_REGION
             Value: !Ref AWS::Region
           - Name: REPOSITORY_URI
-            Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${Repository}/Users/sntadepa/Downloads/ECSworking-https-exp.yaml
+            Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${Repository}
           - Name: PipelineName
             Value: !Ref PipelineName
           - Name: CONFIG_PATH
@@ -533,7 +534,7 @@ Resources:
                 - Name: BuildOutput
               RunOrder: 1
 Outputs:
-  `ecscluster`:
+  ecscluster:
     Value: !Ref 'ECSCluster'
   ECSALB:
     Description: Your ALB DNS URL
