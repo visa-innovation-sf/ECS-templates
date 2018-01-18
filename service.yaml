@@ -81,13 +81,12 @@ Resources:
       Cluster: !Ref Cluster
       Role: !Ref ECSServiceRole
       DesiredCount: !Ref DesiredCount
-      TaskDefinition: arn:aws:ecs:us-east-1:569405759759:task-definition/first-run-task-definition:1
+      TaskDefinition: !Ref TaskDefinition
       LaunchType: FARGATE
       LoadBalancers:
-        - ContainerName: sample-container
+        - ContainerName: cicdoveraws-app
           ContainerPort: !Ref ContainerPort
           TargetGroupArn: !Ref TargetGroup
-      ServiceName: sample-app-service
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
@@ -122,9 +121,8 @@ Resources:
     Type: AWS::ECS::TaskDefinition
     executionRoleArn: arn:aws:iam::569405759759:role/ecsTaskExecutionRole
     Properties:
-      Family: first-run-task-definition
       ContainerDefinitions:
-        - Name: sample-app
+        - Name: cicdoveraws-app
           Image: httpd:2.4
           Cpu: 256
           memoryReservation: 512
@@ -152,36 +150,9 @@ Resources:
                 && httpd-foreground"'
           essential: true
       Memory: '512'
-      cpu: '256'
       compatibilities:
         - EC2
         - FARGATE
-      taskDefinitionArn: arn:aws:ecs:us-east-1:569405759759:task-definition/first-run-task-definition:1
-      requiresAttributes:
-        - targetId:
-          targetType:
-          value:
-          name: com.amazonaws.ecs.capability.docker-remote-api.1.18
-        - targetId:
-          targetType:
-          value:
-          name: ecs.capability.task-eni
-        - targetId:
-          targetType:
-          value:
-          name: ecs.capability.execution-role-awslogs
-        - targetId:
-          targetType:
-          value:
-          name: com.amazonaws.ecs.capability.logging-driver.awslogs
-        - targetId:
-          targetType:
-          value:
-          name: com.amazonaws.ecs.capability.docker-remote-api.1.21
-        - targetId:
-          targetType:
-          value:
-          name: com.amazonaws.ecs.capability.docker-remote-api.1.19
       requiresCompatibilities:
         - FARGATE
       networkMode: awsvpc
