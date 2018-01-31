@@ -1,0 +1,536 @@
+AWSTemplateFormatVersion: '2010-09-09'
+#Take the Health Check path as a parameter.
+Parameters:
+  #KeyName is only for the EC2 Launch type (https://docs.aws.amazon.com/AmazonECS/latest/developerguide/get-set-up-for-amazon-ecs.html)
+  GitHubRepo:
+    Type: String
+    Description: GitHub repository name.
+  GitHubBranch:
+    Type: String
+    Default: master
+    Description: GitHub repository branch.
+  GitHubToken:
+    Type: String
+    Description: GitHub repository OAuth token.
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Select a VPC that allows instances access to the Internet.
+  SubnetId:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: Select at two subnets in your selected VPC.
+  DesiredCapacity:
+    Type: Number
+    Default: '1'
+    Description: Number of instances to launch in your ECS cluster.
+  MaxSize:
+    Type: Number
+    Default: '1'
+    Description: Maximum number of instances that can be launched in your ECS cluster.
+  Cpu:
+    Type: Number
+    Default: 512
+  Memory:
+    Type: Number
+    Default: 1024
+  ContainerPort:
+    Type: Number
+  PipelineName:
+    Type: String
+  HealthCheckPath:
+    Type: String
+    Default: '/'
+  ConfigBucket:
+    Type: String
+    Description: The name of the s3 bucket where the app configurations are stored.
+  ECSCluster:
+    Type: String
+    Description: The name of the Fargate Cluster.
+
+Mappings:
+  AWSRegionToAMI:
+    us-east-1:
+      AMIID: ami-eca289fb
+    us-east-2:
+      AMIID: ami-446f3521
+    us-west-1:
+      AMIID: ami-9fadf8ff
+    us-west-2:
+      AMIID: ami-7abc111a
+    eu-west-1:
+      AMIID: ami-a1491ad2
+    eu-central-1:
+      AMIID: ami-54f5303b
+    ap-northeast-1:
+      AMIID: ami-9cd57ffd
+    ap-southeast-1:
+      AMIID: ami-a900a3ca
+    ap-southeast-2:
+      AMIID: ami-5781be34
+
+Resources:
+  ECSCluster:
+    Type: AWS::ECS::FARGATE
+  Repository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+  EcsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn: ALBSecurityGroup
+    Properties:
+      GroupDescription: ECS Security Group
+      VpcId: !Ref 'VpcId'
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ECS Security Group
+      VpcId: !Ref 'VpcId'
+  ALBSecurityGroupHTTPSinbound:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref 'ALBSecurityGroup'
+      IpProtocol: tcp
+      FromPort: '443'
+      ToPort: '443'
+      CidrIp: 0.0.0.0/0
+  EcsSecurityGroupHTTPinbound:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref 'EcsSecurityGroup'
+      IpProtocol: tcp
+      FromPort: '80'
+      ToPort: '80'
+      CidrIp: 0.0.0.0/0
+  EcsSecurityGroupSSHinbound:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref 'EcsSecurityGroup'
+      IpProtocol: tcp
+      FromPort: '22'
+      ToPort: '22'
+      CidrIp: 0.0.0.0/0
+  EcsSecurityGroupALBports:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref 'EcsSecurityGroup'
+      IpProtocol: tcp
+      FromPort: '0'
+      ToPort: '65000'
+      SourceSecurityGroupId: !Ref 'ALBSecurityGroup'
+  CloudwatchLogsGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Join ['-', [ECSLogGroup, !Ref 'AWS::StackName']]
+      RetentionInDays: 14
+  ECSALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub "ecsalb-${AWS::StackName}"
+      Scheme: internet-facing
+      LoadBalancerAttributes:
+      - Key: idle_timeout.timeout_seconds
+        Value: '30'
+      Subnets: !Ref 'SubnetId'
+      SecurityGroups: [!Ref 'ALBSecurityGroup']
+  ALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    #DependsOn: ECSServiceRole
+    Properties:
+      Certificates:
+        - CertificateArn: arn:aws:acm:us-east-1:569405759759:certificate/f179003c-a6db-4efb-ad40-f7af8b1e50d4
+      DefaultActions:
+      - Type: forward
+        TargetGroupArn: !Ref 'ECSTG'
+      LoadBalancerArn: !Ref 'ECSALB'
+      Port: '443'
+      Protocol: HTTPS
+  ECSALBListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    DependsOn: ALBListener
+    Properties:
+      Actions:
+      - Type: forward
+        TargetGroupArn: !Ref 'ECSTG'
+      Conditions:
+      - Field: path-pattern
+        Values: [/]
+      ListenerArn: !Ref 'ALBListener'
+      Priority: 1
+  ECSTG:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn: ECSALB
+    Properties:
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: !Ref HealthCheckPath
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      Port: '80'
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref 'VpcId'
+
+  # ECSAutoScalingGroup:
+  #   Type: AWS::AutoScaling::AutoScalingGroup
+  #   Properties:
+  #     VPCZoneIdentifier: !Ref 'SubnetId'
+  #     LaunchConfigurationName: !Ref 'ContainerInstances'
+  #     MinSize: '1'
+  #     MaxSize: !Ref 'MaxSize'
+  #     DesiredCapacity: !Ref 'DesiredCapacity'
+  #   CreationPolicy:
+  #     ResourceSignal:
+  #       Timeout: PT15M
+  #   UpdatePolicy:
+  #     AutoScalingReplacingUpdate:
+  #       WillReplace: 'true'
+  # WebServerScaleUpPolicy:
+  #   Type: AWS::AutoScaling::ScalingPolicy
+  #   Properties:
+  #     AdjustmentType: ChangeInCapacity
+  #     AutoScalingGroupName: !Ref ECSAutoScalingGroup
+  #     Cooldown: '60'
+  #     ScalingAdjustment: '1'
+  # WebServerScaleDownPolicy:
+  #   Type: AWS::AutoScaling::ScalingPolicy
+  #   Properties:
+  #     AdjustmentType: ChangeInCapacity
+  #     AutoScalingGroupName: !Ref ECSAutoScalingGroup
+  #     Cooldown: '60'
+  #     ScalingAdjustment: "-1"
+  # CPUReservationHighAlert:
+  #   Type: AWS::CloudWatch::Alarm
+  #   Properties:
+  #     EvaluationPeriods: '1'
+  #     Statistic: Maximum
+  #     Threshold: '50'
+  #     Period: '60'
+  #     AlarmActions:
+  #     - Ref: WebServerScaleUpPolicy
+  #     Dimensions:
+  #     - Name: ClusterName
+  #       Value: !Ref ECSCluster
+  #     ComparisonOperator: GreaterThanThreshold
+  #     MetricName: CPUReservation
+  #     Namespace: AWS/ECS
+
+  # ContainerInstances:
+  #   Type: AWS::AutoScaling::LaunchConfiguration
+  #   Properties:
+  #     ImageId: !FindInMap [AWSRegionToAMI, !Ref 'AWS::Region', AMIID]
+  #     SecurityGroups: [!Ref 'EcsSecurityGroup']
+  #     InstanceType: !Ref 'InstanceType'
+  #     IamInstanceProfile: !Ref 'EC2InstanceProfile'
+  #     KeyName: !Ref 'KeyName'
+  #     UserData:
+  #       Fn::Base64: !Sub |
+  #         Content-Type: multipart/mixed; boundary="==BOUNDARY=="
+  #         MIME-Version: 1.0
+  #
+  #         --==BOUNDARY==
+  #         Content-Type: text/x-shellscript; charset="us-ascii"
+  #         #!/bin/bash -xe
+  #         echo ECS_CLUSTER=${ECSCluster} >> /etc/ecs/ecs.config
+  #         yum install -y aws-cfn-bootstrap
+  #         /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource ECSAutoScalingGroup --region ${AWS::Region}
+  #         cd /tmp
+  #         sudo yum install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm
+  #
+  #         --==BOUNDARY==
+  #         Content-Type: text/x-shellscript; charset="us-ascii"
+  #         #!/bin/bash
+  #         # Install awslogs and the jq JSON parser
+  #         yum install -y awslogs jq
+  #         # Give permissions to the docker and container folders to access log files
+  #         sudo chmod -R a+r /var/lib/docker
+  #         sudo chmod -R a+x /var/lib/docker/containers/
+  #
+  #         # Inject the CloudWatch Logs configuration file contents
+  #         cat > /etc/awslogs/awslogs.conf <<- EOF
+  #         [general]
+  #         state_file = /var/lib/awslogs/agent-state
+  #
+  #         [/var/log/dmesg]
+  #         file = /var/log/dmesg
+  #         log_group_name = /var/log/dmesg
+  #         log_stream_name = {cluster}/{container_instance_id}
+  #
+  #         [/var/log/messages]
+  #         file = /var/log/messages
+  #         log_group_name = /var/log/messages
+  #         log_stream_name = {cluster}/{container_instance_id}
+  #         datetime_format = %b %d %H:%M:%S
+  #
+  #         [/var/lib/docker]
+  #         file = /var/lib/docker/containers/*/*-json.log
+  #         log_group_name = /var/lib/docker
+  #         log_stream_name = {cluster}/{container_instance_id}
+  #         datetime_format = %Y-%m-%dT%H:%M:%S.%f
+  #
+  #         [/var/log/ecs/ecs-agent.log]
+  #         file = /var/log/ecs/ecs-agent.log.*
+  #         log_group_name = /var/log/ecs/ecs-agent.log
+  #         log_stream_name = {cluster}/{container_instance_id}
+  #         datetime_format = %Y-%m-%dT%H:%M:%SZ
+  #
+  #         EOF
+  #
+  #         --==BOUNDARY==
+  #         Content-Type: text/x-shellscript; charset="us-ascii"
+  #         #!/bin/bash
+  #         # Set the region to send CloudWatch Logs data to (the region where the container instance is located)
+  #         region=$(curl -s 169.254.169.254/latest/dynamic/instance-identity/document | jq -r .region)
+  #         sed -i -e "s/region = us-east-1/region = $region/g" /etc/awslogs/awscli.conf
+  #
+  #         --==BOUNDARY==
+  #         Content-Type: text/upstart-job; charset="us-ascii"
+  #
+  #         #upstart-job
+  #         description "Configure and start CloudWatch Logs agent on Amazon ECS container instance"
+  #         author "Amazon Web Services"
+  #         start on started ecs
+  #
+  #         script
+  #           exec 2>>/var/log/ecs/cloudwatch-logs-start.log
+  #           set -x
+  #
+  #           until curl -s http://localhost:51678/v1/metadata
+  #           do
+  #             sleep 1
+  #           done
+  #
+  #           # Grab the cluster and container instance ARN from instance metadata
+  #           cluster=$(curl -s http://localhost:51678/v1/metadata | jq -r '. | .Cluster')
+  #           container_instance_id=$(curl -s http://localhost:51678/v1/metadata | jq -r '. | .ContainerInstanceArn' | awk -F/ '{print $2}' )
+  #
+  #           # Replace the cluster name and container instance ID placeholders with the actual values
+  #           sed -i -e "s/{cluster}/$cluster/g" /etc/awslogs/awslogs.conf
+  #           sed -i -e "s/{container_instance_id}/$container_instance_id/g" /etc/awslogs/awslogs.conf
+  #
+  #           service awslogs start
+  #           chkconfig awslogs on
+  #         end script
+  #         --==BOUNDARY==--
+  EC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: [ec2.amazonaws.com]
+          Action: ['sts:AssumeRole']
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::569405759759:policy/cfn-custom-execution-cloudformation-role
+        - arn:aws:iam::569405759759:policy/ECS-CloudWatchLogs
+  AutoscalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: [application-autoscaling.amazonaws.com]
+          Action: ['sts:AssumeRole']
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::569405759759:policy/sf-AutoScalingPolicy
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles: [!Ref 'EC2Role']
+
+  CloudFormationExecutionRole:
+    Type: AWS::IAM::Role
+    DeletionPolicy: Retain
+    Properties:
+      RoleName: !Sub cfn-${AWS::StackName}
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::569405759759:policy/sf-CloudFormationExecutionPolicy
+      AssumeRolePolicyDocument: |
+        {
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": { "Service": [ "cloudformation.amazonaws.com" ]},
+                "Action": [ "sts:AssumeRole" ]
+            }]
+        }
+
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub cb-${AWS::StackName}
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::569405759759:policy/sf-codebuildservicepolicy
+      AssumeRolePolicyDocument: |
+        {
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": { "Service": [ "codebuild.amazonaws.com" ]},
+                "Action": [ "sts:AssumeRole" ]
+            }]
+        }
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub cp-${AWS::StackName}
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::569405759759:policy/sf-CodePipelineServicePolicy
+      AssumeRolePolicyDocument: |
+        {
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": { "Service": [ "codepipeline.amazonaws.com" ]},
+                "Action": [ "sts:AssumeRole" ]
+            }]
+        }
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Artifacts:
+        Location: !Ref ArtifactBucket
+        Type: "S3"
+      Source:
+        Location: !Sub ${ArtifactBucket}/source.zip
+        Type: "S3"
+        BuildSpec: |
+          version: 0.2
+          phases:
+            pre_build:
+              commands:
+                - TAG="$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | head -c 8)"
+                - $(aws ecr get-login --region $AWS_DEFAULT_REGION)
+                - echo ecr loging successfull
+                - sudo apt-get update
+                - echo Pulling maven image...
+                - docker pull maven:3.3-jdk-8
+                - echo done with the pre build phase
+            build:
+              commands:
+                - echo Build started on `date`
+                - docker run -i --rm -w /opt/maven -v $PWD:/opt/maven -v $HOME/.m2:/root/.m2 maven:3.3-jdk-8 mvn clean install -DskipTests
+                - docker build --build-arg "CONFIG_PATH=${CONFIG_PATH}" --file Dockerfile --tag "${REPOSITORY_URI}:${TAG}" .
+            post_build:
+              commands:
+                - echo post build
+                - docker push "${REPOSITORY_URI}:${TAG}"
+                - printf '{"tag":"%s"}' $TAG > build.json
+          artifacts:
+            files:
+              - build.json
+      Environment:
+        ComputeType: "BUILD_GENERAL1_LARGE"
+        Image: "aws/codebuild/docker:1.12.1"
+        Type: "LINUX_CONTAINER"
+        EnvironmentVariables:
+          - Name: AWS_DEFAULT_REGION
+            Value: !Ref AWS::Region
+          - Name: REPOSITORY_URI
+            Value: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${Repository}
+          - Name: PipelineName
+            Value: !Ref PipelineName
+          - Name: CONFIG_PATH
+            Value: !Ref ConfigBucket
+      Name: !Ref AWS::StackName
+      ServiceRole: !Ref CodeBuildServiceRole
+
+
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Ref PipelineName
+      RoleArn: !GetAtt CodePipelineServiceRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucket
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: GitHubRepoSource
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Provider: GitHub
+                Version: 1
+              Configuration:
+                Owner: visa-innovation-sf
+                Repo: !Ref GitHubRepo
+                Branch: !Ref GitHubBranch
+                OAuthToken: !Ref GitHubToken
+              OutputArtifacts:
+                - Name: GitHubRepoSource
+              RunOrder: 1
+            - Name: Architecture-Template
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: 1
+                Provider: S3
+              OutputArtifacts:
+                - Name: Architecture-Template
+              RunOrder: 1
+              Configuration:
+                S3Bucket: cicdoveraws-visa
+                S3ObjectKey: templates.zip
+        - Name: Build
+          Actions:
+            - Name: Build
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+              InputArtifacts:
+                - Name: GitHubRepoSource
+              OutputArtifacts:
+                - Name: BuildOutput
+              RunOrder: 1
+        - Name: Deploy
+          Actions:
+            - Name: Deploy
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: CloudFormation
+              Configuration:
+                ChangeSetName: Deploy
+                ActionMode: CREATE_UPDATE
+                StackName: !Sub "${AWS::StackName}-Service"
+                Capabilities: CAPABILITY_NAMED_IAM
+                TemplatePath: Architecture-Template::service.yaml
+                RoleArn: !GetAtt CloudFormationExecutionRole.Arn
+                ParameterOverrides: !Sub |
+                  {
+                    "Tag" : { "Fn::GetParam" : [ "BuildOutput", "build.json", "tag" ] },
+                    "DesiredCount": "1",
+                    "Cluster": "${ECSCluster}",
+                    "TargetGroup": "${ECSTG}",
+                    "Repository": "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${Repository}",
+                    "Cpu": "${Cpu}",
+                    "Memory": "${Memory}",
+                    "ContainerPort": "${ContainerPort}"
+                  }
+              InputArtifacts:
+                - Name: Architecture-Template
+                - Name: BuildOutput
+              RunOrder: 1
+Outputs:
+  ecscluster:
+    Value: !Ref 'ECSCluster'
+  ECSALB:
+    Description: Your ALB DNS URL
+    Value: !Join ['', [!GetAtt [ECSALB, DNSName]]]
+  PipelineName:
+    Value: !Ref 'PipelineName'
+  ArtifactBucket:
+    Value: !Ref ArtifactBucket
