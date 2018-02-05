@@ -101,6 +101,36 @@ Resources:
       VpcId: !Ref 'VpcId'
 
 
+  EcsSecurityGroupHTTPinbound:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref 'EcsSecurityGroup'
+      IpProtocol: tcp
+      FromPort: '80'
+      ToPort: '80'
+      CidrIp: 0.0.0.0/0
+
+  EcsSecurityGroupSSHinbound:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref 'EcsSecurityGroup'
+      IpProtocol: tcp
+      FromPort: '22'
+      ToPort: '22'
+      CidrIp: 0.0.0.0/0
+
+  EcsSecurityGroupALBports:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref 'EcsSecurityGroup'
+      IpProtocol: tcp
+      FromPort: '0'
+      ToPort: '65000'
+      SourceSecurityGroupId: !Ref 'ALBSecurityGroup'
+
+
+
+
   # The task definition. This is a simple metadata description of what
   # container to run, and what resource requirements it has.
   TaskDefinition:
@@ -160,7 +190,7 @@ Resources:
       Actions:
       - Type: forward
         TargetGroupArn: !Ref 'ECSTG'
-      Conditions:x
+      Conditions:
       - Field: path-pattern
         Values: [/]
       ListenerArn: !Ref 'ALBListener'
