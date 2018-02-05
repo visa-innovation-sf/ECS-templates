@@ -74,11 +74,18 @@ Conditions:
 
 Resources:
 
-  FargateContainerSecurityGroup:
+  EcsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DependsOn: ALBSecurityGroup
+    Properties:
+      GroupDescription: Access to Fargate Containers
+      VpcId: !Ref 'VpcId'
+  ALBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-    GroupDescription: Access to the Fargate containers
-    VpcId: !Ref 'VpcId'
+      GroupDescription: ECS Security Group
+      VpcId: !Ref 'VpcId'
+
 
   # The task definition. This is a simple metadata description of what
   # container to run, and what resource requirements it has.
@@ -118,7 +125,7 @@ Resources:
           AssignPublicIp: ENABLED
           SecurityGroups:
             - Fn::ImportValue:
-                !Join [':', [!Ref 'StackName', 'FargateContainerSecurityGroup']]
+                !Join [':', [!Ref 'StackName', 'EcsSecurityGroup']]
           Subnets: !Ref 'SubnetId'
       TaskDefinition: !Ref 'TaskDefinition'
       Role:
