@@ -155,7 +155,7 @@ Resources:
   # as monitor the number of running tasks and replace any that have crashed
   Service:
     Type: AWS::ECS::Service
-    DependsOn: LoadBalancerRule
+    DependsOn: ECSALBListenerRule
     Properties:
       ServiceName: !Ref 'ServiceName'
       Cluster: !Ref Cluster
@@ -167,9 +167,7 @@ Resources:
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: ENABLED
-          SecurityGroups:
-            - Fn::ImportValue:
-                !Join [':', [!Ref 'StackName', 'EcsSecurityGroup']]
+          SecurityGroups: [!Ref 'EcsSecurityGroup']
           Subnets: !Ref 'SubnetId'
       TaskDefinition: !Ref 'TaskDefinition'
       Role:
@@ -180,7 +178,7 @@ Resources:
       LoadBalancers:
         - ContainerName: !Ref 'ServiceName'
           ContainerPort: !Ref 'ContainerPort'
-          TargetGroupArn: !Ref 'TargetGroup'
+          TargetGroupArn: !Ref 'ECSTG'
 
   # Create a rule on the load balancer for routing traffic to the target group
   ECSALBListenerRule:
@@ -227,4 +225,5 @@ Resources:
       Port: '80'
       Protocol: HTTP
       UnhealthyThresholdCount: 2
+      TargetType: 'ip'
       VpcId: !Ref 'VpcId'
