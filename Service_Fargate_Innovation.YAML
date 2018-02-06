@@ -495,3 +495,14 @@ Resources:
       UnhealthyThresholdCount: 2
       TargetType: 'ip'
       VpcId: !Ref 'VpcId'
+
+Outputs:
+  Ecscluster:
+    Value: !Ref 'ECSCluster'
+  ECSALB:
+    Description: Your ALB DNS URL
+    Value: !Join ['', [!GetAtt [ECSALB, DNSName]]]
+  PipelineName:
+    Value: !Ref 'PipelineName'
+  ArtifactBucket:
+    Value: !Ref ArtifactBucket
