@@ -45,6 +45,10 @@ Parameters:
     Default: 256
     Description: How much CPU to give the container. 1024 is 1 CPU
 
+  Tag:
+    Type: String
+    Default: latest
+
   ECSCluster:
     Type: String
     Description: The name of the Fargate Cluster.
