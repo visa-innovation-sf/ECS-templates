@@ -462,8 +462,8 @@ Resources:
                     "Cluster": "${ECSCluster}",
                     "TargetGroup": "${ECSTG}",
                     "Repository": "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${Repository}",
-                    "Cpu": "${Cpu}",
-                    "Memory": "${Memory}",
+                    "Cpu": "${ContainerCpu}",
+                    "Memory": "${ContainerMemory}",
                     "ContainerPort": "${ContainerPort}"
                   }
               InputArtifacts:
