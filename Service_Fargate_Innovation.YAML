@@ -201,7 +201,11 @@ Resources:
           SecurityGroups: [!Ref 'EcsSecurityGroup']
           Subnets: !Ref 'SubnetId'
       TaskDefinition: !Ref 'TaskDefinition'
-      Role: !Ref ECSServiceRole
+      Role:
+        Fn::If:
+          - 'HasCustomRole'
+          - !Ref 'Role'
+          - !Ref "AWS::NoValue"
       LoadBalancers:
         - ContainerName: !Ref 'ServiceName'
           ContainerPort: !Ref 'ContainerPort'
