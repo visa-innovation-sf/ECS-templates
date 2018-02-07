@@ -207,7 +207,7 @@ Resources:
           - !Ref 'Role'
           - !Ref "AWS::NoValue"
       LoadBalancers:
-        - ContainerName: !Ref 'ServiceName'
+        - ContainerName: cicdoveraws-app
           ContainerPort: !Ref 'ContainerPort'
           TargetGroupArn: !Ref 'ECSTG'
 
