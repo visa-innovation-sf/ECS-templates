@@ -1,0 +1,142 @@
+Description: >
+  Service & task definition configuration Template - CI & CD over AWS
+
+Parameters:
+  Tag:
+    Type: String
+    Default: latest
+
+  DesiredCount:
+    Type: Number
+    Default: 1
+
+  TargetGroup:
+    Type: String
+
+  Cluster:
+    Type: String
+
+  Repository:
+    Type: String
+
+  Cpu:
+    Type: Number
+    Default: 512
+
+  Memory:
+    Type: Number
+    Default: 1024
+
+  ContainerPort:
+    Type: Number
+
+
+Resources:
+  ECSServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: [ecs.amazonaws.com]
+          Action: ['sts:AssumeRole']
+      Path: /
+      Policies:
+      - PolicyName: ecs-service
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action: ['elasticloadbalancing:DeregisterInstancesFromLoadBalancer', 'elasticloadbalancing:DeregisterTargets',
+              'elasticloadbalancing:Describe*', 'elasticloadbalancing:RegisterInstancesWithLoadBalancer',
+              'elasticloadbalancing:RegisterTargets', 'ec2:Describe*', 'ec2:AuthorizeSecurityGroupIngress']
+            Resource: '*'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole
+
+  AutoscalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: [application-autoscaling.amazonaws.com]
+          Action: ['sts:AssumeRole']
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::569405759759:policy/sf-AutoScalingPolicy
+      Policies:
+      - PolicyName: service-autoscaling
+        PolicyDocument:
+          Statement:
+          - Effect: Allow
+            Action: ['application-autoscaling:*', 'cloudwatch:DescribeAlarms', 'cloudwatch:PutMetricAlarm',
+              'ecs:DescribeServices', 'ecs:UpdateService']
+            Resource: '*'
+
+
+  # The service. The service is a resource which allows you to run multiple
+  # copies of a type of task, and gather up their logs and metrics, as well
+  # as monitor the number of running tasks and replace any that have crashed
+  Service:
+    Type: AWS::ECS::Service
+    DependsOn: ECSALBListenerRule
+    Properties:
+      ServiceName: !Ref 'ServiceName'
+      Cluster: !Ref ECSCluster
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 75
+      DesiredCount: !Ref 'DesiredCount'
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups: [!Ref 'EcsSecurityGroup']
+          Subnets: !Ref 'SubnetId'
+      TaskDefinition: !Ref 'TaskDefinition'
+      Role:
+        Fn::If:
+          - 'HasCustomRole'
+          - !Ref 'Role'
+          - !Ref "AWS::NoValue"
+      LoadBalancers:
+        - ContainerName: cicdoveraws-app
+          ContainerPort: !Ref 'ContainerPort'
+          TargetGroupArn: !Ref 'ECSTG'
+
+  # The task definition. This is a simple metadata description of what
+  # container to run, and what resource requirements it has.
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      #Family: !Ref 'ServiceName'
+      Family: !Sub ${AWS::StackName}--app
+      Cpu: !Ref 'ContainerCpu'
+      Memory: !Ref 'ContainerMemory'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ContainerDefinitions:
+        - Name: cicdoveraws-app
+          Cpu: !Ref 'ContainerCpu'
+          Memory: !Ref 'ContainerMemory'
+          Image: !Sub ${Repository}:${Tag}
+          PortMappings:
+            - ContainerPort: !Ref 'ContainerPort'
+          Environment:
+            - Name: Tag
+              Value: !Ref Tag
+
+Outputs:
+  ImageName:
+    Description: ImageName
+    Value: !Sub ${Repository}:${Tag}
+
+  Service:
+    Description: Service Name
+    Value: !Ref service
+
+  StackName:
+    Value: !Ref AWS::StackName

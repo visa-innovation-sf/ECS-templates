@@ -1,15 +1,18 @@
-#Updated Service & Task Definition template for the Innovation Platform Services.
-#Committed to fargate-template branch
-
 AWSTemplateFormatVersion: '2010-09-09'
 Description: Deploy a service on AWS Fargate, hosted in a public subnet, and accessible via a public load balancer.
 
 Parameters:
+#New parameter. Not present in the previous template
   StackName:
     Type: String
     Default: production
     Description: The name of the parent Fargate networking stack that you created. Necessary
                  to locate and reference resources created by that stack.
+
+  ServiceName:
+    Type: String
+    Description: A name for the service
+
   GitHubRepo:
     Type: String
     Description: GitHub repository name.
@@ -23,41 +26,6 @@ Parameters:
     Type: String
     Description: GitHub repository OAuth token.
 
-  ServiceName:
-    Type: String
-    Default: nginx
-    Description: A name for the service
-
-  ConfigBucket:
-    Type: String
-    Description: The name of the s3 bucket where the app configurations are stored.
-
-  PipelineName:
-    Type: String
-
-  ContainerPort:
-    Type: Number
-    Default: 80
-    Description: What port number the application inside the docker container is binding to
-
-  ContainerCpu:
-    Type: Number
-    Default: 256
-    Description: How much CPU to give the container. 1024 is 1 CPU
-
-  Tag:
-    Type: String
-    Default: latest
-
-  ECSCluster:
-    Type: String
-    Description: The name of the Fargate Cluster.
-
-  ContainerMemory:
-    Type: Number
-    Default: 512
-    Description: How much memory in megabytes to give the container
-
   VpcId:
     Type: AWS::EC2::VPC::Id
     Description: Select a VPC that allows instances access to the Internet.
@@ -66,12 +34,54 @@ Parameters:
     Type: List<AWS::EC2::Subnet::Id>
     Description: Select at two subnets in your selected VPC.
 
+#New parameter. Not present in the previous template
+  DesiredCount:
+    Type: Number
+    Default: 2
+    Description: How many copies of the service task to run
+
+  ContainerCpu:
+    Type: Number
+    Default: 256
+    Description: How much CPU to give the container. 1024 is 1 CPU
+
+  ContainerMemory:
+    Type: Number
+    Default: 512
+    Description: How much memory in megabytes to give the container
+
+  ContainerPort:
+    Type: Number
+    Default: 80
+    Description: What port number the application inside the docker container is binding to
+
+  PipelineName:
+    Type: String
+
+  ConfigBucket:
+    Type: String
+    Description: The name of the s3 bucket where the app configurations are stored.
+
+  ECSCluster:
+    Type: String
+    Description: The name of the Fargate Cluster.
+
+  HealthCheckPath:
+    Type: String
+    Default: '/'
+
+  PipelineName:
+    Type: String
+
+#New parameter. Not present in the previous template
   Path:
     Type: String
     Default: "*"
     Description: A path on the public load balancer that this service
                  should be connected to. Use * to send all load balancer
                  traffic to this service.
+
+#New parameter. Not present in the previous template
   Priority:
     Type: Number
     Default: 1
@@ -79,23 +89,39 @@ Parameters:
                  This only applies if your have multiple services which have been
                  assigned to different paths on the load balancer.
 
-  DesiredCount:
-    Type: Number
-    Default: 2
-    Description: How many copies of the service task to run
+#New parameter. Not present in the previous template
+  Conditions:
+    HasCustomRole: !Not [ !Equals [!Ref 'Role', ''] ]
 
-  Role:
-    Type: String
-    Default: ""
-    Description: (Optional) An IAM role to give the service's containers if the code within needs to
-                 access other AWS resources like S3 buckets, DynamoDB tables, etc
-
-Conditions:
-  HasCustomRole: !Not [ !Equals [!Ref 'Role', ''] ]
-
-
+Mappings:
+  AWSRegionToAMI:
+    us-east-1:
+      AMIID: ami-eca289fb
+    us-east-2:
+      AMIID: ami-446f3521
+    us-west-1:
+      AMIID: ami-9fadf8ff
+    us-west-2:
+      AMIID: ami-7abc111a
+    eu-west-1:
+      AMIID: ami-a1491ad2
+    eu-central-1:
+      AMIID: ami-54f5303b
+    ap-northeast-1:
+      AMIID: ami-9cd57ffd
+    ap-southeast-1:
+      AMIID: ami-a900a3ca
+    ap-southeast-2:
+      AMIID: ami-5781be34
 
 Resources:
+
+  ECSCluster:
+    Type: AWS::ECS::FARGATE
+
+  Repository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
 
   EcsSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -104,9 +130,20 @@ Resources:
       GroupDescription: Access to Fargate Containers
       VpcId: !Ref 'VpcId'
 
-  Repository:
-    Type: AWS::ECR::Repository
-    DeletionPolicy: Retain
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ECS Security Group
+      VpcId: !Ref 'VpcId'
+
+  ALBSecurityGroupHTTPSinbound:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref 'ALBSecurityGroup'
+      IpProtocol: tcp
+      FromPort: '443'
+      ToPort: '443'
+      CidrIp: 0.0.0.0/0
 
   ALBListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
@@ -120,13 +157,6 @@ Resources:
       LoadBalancerArn: !Ref 'ECSALB'
       Port: '443'
       Protocol: HTTPS
-
-  ALBSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: ECS Security Group
-      VpcId: !Ref 'VpcId'
-
 
   EcsSecurityGroupHTTPinbound:
     Type: AWS::EC2::SecurityGroupIngress
@@ -212,27 +242,7 @@ Resources:
           TargetGroupArn: !Ref 'ECSTG'
 
 
-  ECSServiceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Statement:
-        - Effect: Allow
-          Principal:
-            Service: [ecs.amazonaws.com]
-          Action: ['sts:AssumeRole']
-      Path: /
-      Policies:
-      - PolicyName: ecs-service
-        PolicyDocument:
-          Statement:
-          - Effect: Allow
-            Action: ['elasticloadbalancing:DeregisterInstancesFromLoadBalancer', 'elasticloadbalancing:DeregisterTargets',
-              'elasticloadbalancing:Describe*', 'elasticloadbalancing:RegisterInstancesWithLoadBalancer',
-              'elasticloadbalancing:RegisterTargets', 'ec2:Describe*', 'ec2:AuthorizeSecurityGroupIngress']
-            Resource: '*'
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole
+
 
 
 
@@ -276,18 +286,6 @@ Resources:
         - arn:aws:iam::569405759759:policy/cfn-custom-execution-cloudformation-role
         - arn:aws:iam::569405759759:policy/ECS-CloudWatchLogs
 
-  AutoscalingRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Statement:
-        - Effect: Allow
-          Principal:
-            Service: [application-autoscaling.amazonaws.com]
-          Action: ['sts:AssumeRole']
-      Path: /
-      ManagedPolicyArns:
-        - arn:aws:iam::569405759759:policy/sf-AutoScalingPolicy
 
   EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -461,7 +459,7 @@ Resources:
                 ActionMode: CREATE_UPDATE
                 StackName: !Sub "${AWS::StackName}-Service"
                 Capabilities: CAPABILITY_NAMED_IAM
-                #TemplatePath: Architecture-Template::service.yaml
+                TemplatePath: Architecture-Template::service.yaml
                 RoleArn: !GetAtt CloudFormationExecutionRole.Arn
                 ParameterOverrides: !Sub |
                   {
@@ -490,7 +488,7 @@ Resources:
     DependsOn: ECSALB
     Properties:
       HealthCheckIntervalSeconds: 10
-      HealthCheckPath: /
+      HealthCheckPath: !Ref HealthCheckPath
       HealthCheckProtocol: HTTP
       HealthCheckTimeoutSeconds: 5
       HealthyThresholdCount: 2
