@@ -96,11 +96,7 @@ Resources:
           SecurityGroups: [!Ref 'EcsSecurityGroup']
           Subnets: !Ref 'SubnetId'
       TaskDefinition: !Ref 'TaskDefinition'
-      Role:
-        Fn::If:
-          - 'HasCustomRole'
-          - !Ref 'Role'
-          - !Ref "AWS::NoValue"
+      Role: !Ref ECSServiceRole
       LoadBalancers:
         - ContainerName: cicdoveraws-app
           ContainerPort: !Ref 'ContainerPort'
